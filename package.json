@@ -15,7 +15,7 @@
     "check:bundle": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
-    "next": "15.1.6",
+    "next": "15.5.24",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
@@ -30,7 +30,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^15.1.6",
+    "eslint-config-next": "^15.5.24",
     "jsdom": "^30.0.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5",
