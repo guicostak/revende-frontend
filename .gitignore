@@ -11,6 +11,9 @@ next-env.d.ts.timestamp
 # Cache incremental do TypeScript
 tsconfig.tsbuildinfo
 
+# Relatório de cobertura (gerado pelo Vitest, consumido pelo SonarCloud)
+/coverage
+
 # Estado local do Obsidian (o vault em docs/ é versionado, a UI não)
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
