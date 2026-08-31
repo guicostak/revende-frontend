@@ -1,0 +1,17 @@
+/node_modules
+/.next/
+/out/
+/build
+.DS_Store
+*.pem
+npm-debug.log*
+.env*.local
+next-env.d.ts.timestamp
+
+# Cache incremental do TypeScript
+tsconfig.tsbuildinfo
+
+# Estado local do Obsidian (o vault em docs/ é versionado, a UI não)
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/cache
