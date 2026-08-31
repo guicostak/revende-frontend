@@ -105,6 +105,10 @@ jobs:
           path: |
             .next/**
             !.next/cache/**
+          # `.next` começa com ponto: sem isto o upload ignora tudo como oculto.
+          include-hidden-files: true
+          # Artefato vazio é falha de pipeline, não aviso a ser ignorado.
+          if-no-files-found: error
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────
