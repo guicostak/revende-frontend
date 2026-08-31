@@ -250,6 +250,8 @@ jobs:
             echo "| Testes e cobertura | $(icone '${{ needs.testes.result }}') |"
             echo "| Segurança (CodeQL) | $(icone '${{ needs.seguranca.result }}') |"
             echo "| Quality gate (SonarCloud) | $(icone '${{ needs.qualidade.result }}') |"
+            echo ""
+            echo "Publicação em homologação sai quando a mensagem do commit em \`main\` contém \`#deployuat\`, ou por disparo manual."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Reprovar se algum estágio falhou
@@ -257,3 +259,85 @@ jobs:
         run: |
           echo "Pelo menos um estágio falhou. Veja o painel acima."
           exit 1
+
+  # ─────────────────────────────────────────────────────────────
+  # 7. Publicação em homologação: imagem Docker no Nexus.
+  #    Só em push no main, e só depois de TODOS os estágios passarem.
+  # ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Homologação (Nexus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: resumo
+    # Publicação sob demanda: só sai quando a mensagem do commit pede, ou por
+    # disparo manual. Evita publicar a cada merge sem que ninguém tenha decidido.
+    if: >-
+      github.ref == 'refs/heads/main' && (
+        (github.event_name == 'push' && contains(github.event.head_commit.message, '#deployuat'))
+        || github.event_name == 'workflow_dispatch'
+      )
+    environment: homologacao
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Sem as variáveis do Nexus o login falharia com erro de rede ou 401,
+      # que não dizem a ninguém o que configurar. Ver infra/nexus/README.md §8.
+      - name: O Nexus está configurado?
+        id: nexus
+        run: |
+          if [ -n "${{ vars.NEXUS_REGISTRY }}" ] && [ -n "${{ secrets.NEXUS_PASSWORD }}" ]; then
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Publicação pulada — Nexus não configurado"
+              echo ""
+              echo "Falta cadastrar a variável \`NEXUS_REGISTRY\` e os segredos"
+              echo "\`NEXUS_USERNAME\` / \`NEXUS_PASSWORD\` neste repositório."
+              echo ""
+              echo "Passo a passo em \`infra/nexus/README.md\`."
+              echo ""
+              echo "> Lembre que um Nexus em \`localhost\` não é alcançável pelo runner"
+              echo "> do GitHub: ou o runner é self-hosted, ou o Nexus tem endereço público."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Autenticar no Nexus
+        if: steps.nexus.outputs.configurado == 'true'
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" \
+            | docker login "${{ vars.NEXUS_REGISTRY }}" \
+                -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
+
+      # `NEXT_PUBLIC_*` é inlinado em tempo de build: a imagem de homologação
+      # aponta para a API de homologação e não pode ser reaproveitada em produção.
+      - name: Construir e publicar imagem
+        if: steps.nexus.outputs.configurado == 'true'
+        id: publicar
+        env:
+          IMAGEM: ${{ vars.NEXUS_REGISTRY }}/${{ vars.NEXUS_IMAGE || 'revende-frontend' }}
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL="${{ vars.UAT_API_URL }}" \
+            --build-arg NEXT_PUBLIC_SITE_URL="${{ vars.UAT_SITE_URL }}" \
+            -t "$IMAGEM:${{ github.sha }}" \
+            -t "$IMAGEM:homologacao" \
+            .
+          docker push "$IMAGEM:${{ github.sha }}"
+          docker push "$IMAGEM:homologacao"
+          echo "imagem=$IMAGEM:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Registrar publicação
+        if: steps.nexus.outputs.configurado == 'true'
+        run: |
+          {
+            echo "### 🚀 Publicado em homologação"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Imagem | \`${{ steps.publicar.outputs.imagem }}\` |"
+            echo "| Tag móvel | \`homologacao\` |"
+            echo "| Registry | ${{ vars.NEXUS_REGISTRY }} |"
+            echo "| API embutida | ${{ vars.UAT_API_URL }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

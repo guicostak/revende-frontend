@@ -393,6 +393,7 @@ Checklist completo: `docs/seo/checklist-seo.md`.
 | Segurança | CodeQL (`javascript-typescript`) |
 | Quality gate | SonarCloud, projeto `guicostak_revende-frontend` |
 | Resumo | painel final; reprova se qualquer estágio falhou |
+| Homologação | imagem Docker publicada no Nexus |
 
 Duas guardas são próprias deste projeto e ficam em `scripts/`:
 
@@ -402,6 +403,24 @@ Duas guardas são próprias deste projeto e ficam em `scripts/`:
 - **`check-bundle-budget.mjs`** — mede o First Load JS compartilhado em gzip e reprova
   acima de **120 KB** (hoje em 103 KB). Subir o teto é decisão explícita, editando a
   constante com justificativa.
+
+### Publicação em homologação
+
+Sai **sob demanda**: só quando a mensagem do commit em `main` contém `#deployuat`, ou
+por disparo manual. Publica uma imagem Docker no Nexus, com as tags `<sha>` e
+`homologacao`.
+
+O `next.config.ts` usa `output: 'standalone'` — é o que permite a imagem enxuta com o
+servidor Node que `/` e `/evento/[id]` precisam (as duas são rotas dinâmicas; export
+estático não serviria).
+
+**`NEXT_PUBLIC_*` é inlinado em tempo de build, não lido em runtime.** A imagem de
+homologação embute a URL da API de homologação e **não** pode ser promovida para
+produção — cada ambiente tem sua imagem, ainda que do mesmo commit.
+
+O Nexus sobe com `docker compose -f infra/nexus/docker-compose.yml up -d`. A
+configuração dos repositórios, do realm Docker e das variáveis da pipeline está em
+[`infra/nexus/README.md`](infra/nexus/README.md).
 
 ## Pendências conhecidas
 
@@ -438,4 +457,7 @@ do evento (as duas que precisam ranquear) renderizariam vazias.
   (`use<Nome>Hook`), o `AuthContext` e os utilitários de JSON-LD.
 - `NEXT_PUBLIC_SITE_URL` precisa apontar para o domínio real em produção: canonical,
   Open Graph, sitemap e JSON-LD saem dele.
-- Deploy ainda não existe: falta o estágio de publicação no Nexus.
+- O Nexus do `infra/nexus/` roda em `localhost`, e **runner do GitHub não alcança
+  localhost**. Para a publicação sair de verdade: runner self-hosted, Nexus com
+  endereço público, ou Nexus no GCP. Ver `infra/nexus/README.md`.
+- A pipeline não valida a imagem depois de publicada (smoke test do container).

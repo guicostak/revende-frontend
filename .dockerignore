@@ -1,0 +1,15 @@
+# Tudo que o build não precisa — cada arquivo aqui é camada que não vai para a
+# imagem e contexto que não sobe para o daemon.
+node_modules
+.next
+out
+coverage
+.git
+.github
+docs
+scripts
+*.md
+.env*.local
+tsconfig.tsbuildinfo
+.DS_Store
+.claude

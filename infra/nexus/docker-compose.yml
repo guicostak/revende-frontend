@@ -1,0 +1,40 @@
+# Nexus Repository Manager 3 para desenvolvimento e homologação local.
+#
+# Sobe com:  docker compose -f infra/nexus/docker-compose.yml up -d
+# Primeiro boot leva de 2 a 4 minutos. Acompanhe com:
+#   docker compose -f infra/nexus/docker-compose.yml logs -f
+#
+# A configuração dos repositórios está no README.md ao lado.
+
+services:
+  nexus:
+    image: sonatype/nexus3:3.75.1
+    container_name: revende-nexus
+    restart: unless-stopped
+    ports:
+      # Interface web e API REST.
+      - "8081:8081"
+      # Conector do registry Docker. A API do Docker Registry exige porta (ou
+      # subdomínio) própria: não dá para servi-la sob um path do 8081.
+      - "5000:5000"
+    environment:
+      # O padrão do Nexus assume uma máquina bem maior. Sem este teto ele
+      # reserva heap demais e o Docker Desktop mata o container no boot.
+      INSTALL4J_ADD_VM_PARAMS: >-
+        -Xms1200m -Xmx1200m
+        -XX:MaxDirectMemorySize=2g
+        -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+    volumes:
+      # Volume nomeado, e não bind mount: a imagem roda como uid 200 e um
+      # diretório do host viria com dono errado.
+      - nexus-data:/nexus-data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/service/rest/v1/status"]
+      interval: 15s
+      timeout: 10s
+      # ~5 minutos de tolerância: o primeiro boot inicializa o banco interno.
+      retries: 20
+      start_period: 120s
+
+volumes:
+  nexus-data:
