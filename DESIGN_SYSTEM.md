@@ -417,7 +417,11 @@ O que o projeto faz — e por que não faz mais que isso:
 
 ## 7. Checklist — rode antes de fechar qualquer tarefa de UI
 
-**Tokens**
+Os itens de **Tokens** são verificados automaticamente por
+`npm run check:tokens`, que roda na pipeline e reprova o PR. O resto continua
+sendo trabalho de gente — nenhum script julga hierarquia visual.
+
+**Tokens** *(automatizado)*
 - [ ] Zero cor hardcoded e zero paleta genérica do Tailwind (`gray-*`, `pink-*`, `red-*`)
 - [ ] Zero valor arbitrário (`p-[13px]`, `text-[#f03]`)
 - [ ] Espaçamento só nos degraus 1/2/4/6/8/12/16

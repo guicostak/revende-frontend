@@ -71,12 +71,20 @@ entra aqui. Regra sem nota vira folclore.
 ## Comandos
 
 ```bash
-npm run dev      # servidor de desenvolvimento (http://localhost:3000)
-npm run build    # build de produção (roda typecheck)
-npm run start    # sobe o build de produção
-npm run lint     # ESLint (next/core-web-vitals + next/typescript)
-npx tsc --noEmit # apenas typecheck — rode sempre antes de finalizar uma tarefa
+npm run dev            # servidor de desenvolvimento (http://localhost:3000)
+npm run build          # build de produção (roda typecheck)
+npm run start          # sobe o build de produção
+npm run lint           # ESLint (next/core-web-vitals + next/typescript)
+npm run typecheck      # tsc --noEmit — rode sempre antes de finalizar uma tarefa
+npm test               # testes unitários (Vitest)
+npm run test:watch     # testes em modo watch
+npm run test:coverage  # cobertura em lcov (o que o SonarCloud consome)
+npm run check:tokens   # guarda dos tokens do design system
+npm run check:bundle   # orçamento do JS compartilhado (precisa de build antes)
 ```
+
+Antes de abrir PR, o mínimo é `npm run typecheck && npm run lint && npm test &&
+npm run check:tokens`. A pipeline roda exatamente isso, e mais.
 
 A API (backend Spring) roda em `http://localhost:8080`. A URL vem de
 `NEXT_PUBLIC_API_URL` em `.env.local`.
@@ -372,6 +380,29 @@ Checklist completo: `docs/seo/checklist-seo.md`.
 
 ---
 
+## Pipeline
+
+`.github/workflows/ci.yml` roda em push e PR na `main`. Espelha a estrutura do
+`revende-backend`, adaptada ao stack Node:
+
+| Estágio | O que faz |
+| ------- | --------- |
+| Validação | `tsc`, ESLint, guarda dos tokens, actionlint |
+| Build | `next build` + orçamento do JS compartilhado |
+| Testes e cobertura | Vitest com lcov, resumo no painel |
+| Segurança | CodeQL (`javascript-typescript`) |
+| Quality gate | SonarCloud, projeto `guicostak_revende-frontend` |
+| Resumo | painel final; reprova se qualquer estágio falhou |
+
+Duas guardas são próprias deste projeto e ficam em `scripts/`:
+
+- **`check-design-tokens.mjs`** — reprova paleta genérica do Tailwind, `text-white`,
+  medida ou cor mágica (`p-[13px]`, `text-[#f03]`) e breakpoint desligado (`sm:`,
+  `xl:`, `2xl:`). É o `DESIGN_SYSTEM.md` §7 deixando de depender de memória.
+- **`check-bundle-budget.mjs`** — mede o First Load JS compartilhado em gzip e reprova
+  acima de **120 KB** (hoje em 103 KB). Subir o teto é decisão explícita, editando a
+  constante com justificativa.
+
 ## Pendências conhecidas
 
 ### Bloqueado por campo que a API ainda não devolve
@@ -402,7 +433,9 @@ do evento (as duas que precisam ranquear) renderizariam vazias.
 
 ### Geral
 
-- Sem testes. Ao adicionar, preferir Vitest + Testing Library, testando os hooks
-  (`use<Nome>Hook`) e os loaders — é onde a lógica está.
+- Cobertura de testes em ~45%. O que tem lógica está coberto (`httpClient` 97%,
+  `useAsync` 100%, `format` 92%); o que falta são os hooks de página
+  (`use<Nome>Hook`), o `AuthContext` e os utilitários de JSON-LD.
 - `NEXT_PUBLIC_SITE_URL` precisa apontar para o domínio real em produção: canonical,
   Open Graph, sitemap e JSON-LD saem dele.
+- Deploy ainda não existe: falta o estágio de publicação no Nexus.
