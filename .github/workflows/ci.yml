@@ -1,0 +1,258 @@
+name: Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. Falha rápido: tipo, lint, token fora do design system ou
+  #    workflow inválido aparecem em ~1min, sem gastar runner adiante.
+  # ─────────────────────────────────────────────────────────────
+  validacao:
+    name: Validação
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Tipagem (tsc)
+        run: npm run typecheck
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      # Torna executável o que o DESIGN_SYSTEM.md §7 antes só pedia na revisão.
+      - name: Tokens do design system
+        run: npm run check:tokens
+
+      - name: Sintaxe dos workflows (actionlint)
+        uses: reviewdog/action-actionlint@v1
+        with:
+          reporter: github-check
+          fail_level: error
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. Compila e mede. O orçamento de bundle mora aqui porque é o
+  #    build que o produz — não vale trafegar .next entre jobs.
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: validacao
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Compilar (next build)
+        run: npm run build
+
+      - name: Orçamento do JS compartilhado
+        id: bundle
+        run: |
+          {
+            echo "### 📦 Bundle"
+            echo ""
+            echo '```'
+            npm run --silent check:bundle
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v7
+        with:
+          name: aplicacao-build
+          path: |
+            .next/
+            !.next/cache/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────
+  # 3 e 4 rodam EM PARALELO depois do build.
+  # ─────────────────────────────────────────────────────────────
+  testes:
+    name: Testes e cobertura
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: build
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar testes com cobertura
+        run: npm run test:coverage
+
+      - name: Resumo dos testes
+        if: always()
+        run: |
+          {
+            echo "### 🧪 Testes e cobertura"
+            echo ""
+            if [ -f coverage/coverage-summary.json ]; then
+              node -e '
+                const t = require("./coverage/coverage-summary.json").total;
+                const linha = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+                console.log("| Métrica | % | Coberto |");
+                console.log("|---|---|---|");
+                ["lines","statements","functions","branches"].forEach((k) => console.log(linha(k)));
+              '
+            else
+              echo "Nenhum relatório de cobertura encontrado."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar cobertura
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  seguranca:
+    name: Segurança
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CodeQL — inicializar
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      # JavaScript não precisa de compilação para o CodeQL analisar.
+      - name: CodeQL — analisar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+
+  # ─────────────────────────────────────────────────────────────
+  # 5. Quality gate: consome a cobertura produzida no estágio 3.
+  # ─────────────────────────────────────────────────────────────
+  qualidade:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: testes
+    steps:
+      # fetch-depth 0: o Sonar precisa do histórico para atribuir
+      # "código novo" ao autor e à data certos.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Recuperar cobertura do estágio 3
+        uses: actions/download-artifact@v7
+        with:
+          name: cobertura
+          path: coverage/
+
+      # Sem o token, o scan falharia com erro de autenticação — que não diz
+      # a ninguém o que fazer. Preferimos avisar o que falta configurar.
+      - name: O quality gate está configurado?
+        id: sonar
+        run: |
+          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Quality gate não configurado"
+              echo ""
+              echo "A análise do SonarCloud foi pulada. Para ligá-la:"
+              echo ""
+              echo "1. Crie o projeto \`guicostak_revende-frontend\` em sonarcloud.io,"
+              echo "   na organização \`guicostak\` (a mesma do revende-backend)."
+              echo "2. Em *Administration → Analysis Method*, desligue a Automatic Analysis"
+              echo "   — ela conflita com a análise vinda da pipeline."
+              echo "3. Cadastre o segredo \`SONAR_TOKEN\` neste repositório."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: SonarCloud
+        if: steps.sonar.outputs.configurado == 'true'
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+
+  # ─────────────────────────────────────────────────────────────
+  # 6. Painel final: roda mesmo com estágio quebrado.
+  # ─────────────────────────────────────────────────────────────
+  resumo:
+    name: Resumo
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [validacao, build, testes, seguranca, qualidade]
+    if: always()
+    steps:
+      - name: Montar painel
+        run: |
+          icone() { case "$1" in
+            success) echo "✅ passou" ;;
+            failure) echo "❌ falhou" ;;
+            cancelled) echo "⚪ cancelado" ;;
+            skipped) echo "⏭️ pulado" ;;
+            *) echo "❔ $1" ;;
+          esac; }
+          {
+            echo "## Pipeline · ${{ github.ref_name }}"
+            echo ""
+            echo "| Estágio | Resultado |"
+            echo "|---------|-----------|"
+            echo "| Validação (tipos, lint, tokens, workflows) | $(icone '${{ needs.validacao.result }}') |"
+            echo "| Build e orçamento de bundle | $(icone '${{ needs.build.result }}') |"
+            echo "| Testes e cobertura | $(icone '${{ needs.testes.result }}') |"
+            echo "| Segurança (CodeQL) | $(icone '${{ needs.seguranca.result }}') |"
+            echo "| Quality gate (SonarCloud) | $(icone '${{ needs.qualidade.result }}') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reprovar se algum estágio falhou
+        if: contains(needs.*.result, 'failure')
+        run: |
+          echo "Pelo menos um estágio falhou. Veja o painel acima."
+          exit 1
