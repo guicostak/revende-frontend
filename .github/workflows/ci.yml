@@ -81,23 +81,30 @@ jobs:
         run: npm run build
 
       - name: Orçamento do JS compartilhado
-        id: bundle
         run: |
+          # `tee` sem pipefail devolveria o status do tee, mascarando o estouro
+          # do orçamento. PIPESTATUS guarda o status real do comando.
+          set +e
+          npm run --silent check:bundle | tee bundle.txt
+          status=${PIPESTATUS[0]}
+          set -e
           {
             echo "### 📦 Bundle"
             echo ""
             echo '```'
-            npm run --silent check:bundle
+            cat bundle.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          rm -f bundle.txt
+          exit "$status"
 
       - name: Publicar artefato
         uses: actions/upload-artifact@v7
         with:
           name: aplicacao-build
           path: |
-            .next/
-            !.next/cache/
+            .next/**
+            !.next/cache/**
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────
@@ -129,17 +136,7 @@ jobs:
           {
             echo "### 🧪 Testes e cobertura"
             echo ""
-            if [ -f coverage/coverage-summary.json ]; then
-              node -e '
-                const t = require("./coverage/coverage-summary.json").total;
-                const linha = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
-                console.log("| Métrica | % | Coberto |");
-                console.log("|---|---|---|");
-                ["lines","statements","functions","branches"].forEach((k) => console.log(linha(k)));
-              '
-            else
-              echo "Nenhum relatório de cobertura encontrado."
-            fi
+            node scripts/coverage-summary.mjs
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publicar cobertura
