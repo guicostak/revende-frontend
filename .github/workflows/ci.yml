@@ -296,7 +296,7 @@ jobs:
               echo "Falta cadastrar a variável \`NEXUS_REGISTRY\` e os segredos"
               echo "\`NEXUS_USERNAME\` / \`NEXUS_PASSWORD\` neste repositório."
               echo ""
-              echo "Passo a passo em \`infra/nexus/README.md\`."
+              echo "Passo a passo em \`infra/nexus/README.md\` §9."
               echo ""
               echo "> Lembre que um Nexus em \`localhost\` não é alcançável pelo runner"
               echo "> do GitHub: ou o runner é self-hosted, ou o Nexus tem endereço público."

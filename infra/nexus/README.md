@@ -70,32 +70,75 @@ Em **Settings (⚙) → Security → Users → Create local user**:
 Não use o `admin` na pipeline: quando a credencial vazar — e credencial de CI
 vaza — o estrago fica limitado a publicar imagem, não a administrar o Nexus.
 
-## 6. Registry inseguro (só em desenvolvimento local)
+## 6. Sobre HTTP no registry
 
-O conector da porta 5000 fala HTTP puro. O Docker recusa registries HTTP por
-padrão. Em **Docker Desktop → Settings → Docker Engine**, acrescente:
+O conector da porta 5000 fala HTTP puro, e o Docker recusa registries HTTP —
+**exceto em `localhost`**, que ele já trata como inseguro por padrão. Ou seja:
+para uso local **não é preciso configurar nada**.
+
+A exceção some no momento em que o Nexus deixa de ser `localhost`. Aí, ou o
+registry ganha TLS por trás de um proxy reverso, ou cada cliente precisa de
+`insecure-registries` em **Docker Desktop → Settings → Docker Engine**:
 
 ```json
-{ "insecure-registries": ["localhost:5000"] }
+{ "insecure-registries": ["nexus.seudominio.com.br:5000"] }
 ```
 
-Isto é aceitável em máquina de desenvolvimento e **não** em rede compartilhada.
-Numa instalação real, ponha um proxy reverso com TLS na frente e remova esta
-exceção.
+Aceitável em laboratório, ruim em rede compartilhada: sem TLS, a credencial de
+push trafega em claro.
 
-## 7. Testar o fluxo à mão
+## 7. Atalho: configurar pela API
+
+Os passos 3 e 4 também saem por REST, o que é mais rápido e reproduzível. Com a
+senha inicial em `$PW`:
+
+```bash
+# Repositório docker hosted, conector na 5000
+curl -u "admin:$PW" -X POST http://localhost:8081/service/rest/v1/repositories/docker/hosted \
+  -H 'Content-Type: application/json' -d '{
+    "name": "docker-hosted",
+    "online": true,
+    "storage": { "blobStoreName": "default", "strictContentTypeValidation": true, "writePolicy": "ALLOW" },
+    "docker": { "v1Enabled": false, "forceBasicAuth": true, "httpPort": 5000 }
+  }'
+
+# Docker Bearer Token Realm — sem ele o `docker login` devolve 401
+curl -u "admin:$PW" -X PUT http://localhost:8081/service/rest/v1/security/realms/active \
+  -H 'Content-Type: application/json' -d '["NexusAuthenticatingRealm","DockerToken"]'
+```
+
+Os ids válidos de realm saem de `GET /service/rest/v1/security/realms/available`.
+
+## 8. Testar o fluxo à mão
 
 ```bash
 docker login localhost:5000 -u ci-publisher
+
 docker build -t localhost:5000/revende-frontend:teste \
   --build-arg NEXT_PUBLIC_API_URL=http://localhost:8080 \
   --build-arg NEXT_PUBLIC_SITE_URL=http://localhost:3000 .
+
 docker push localhost:5000/revende-frontend:teste
 ```
 
-Confirme em **Browse → docker-hosted**.
+Confirme que o artefato chegou:
 
-## 8. Ligar a pipeline
+```bash
+curl -u "admin:$PW" \
+  "http://localhost:8081/service/rest/v1/components?repository=docker-hosted"
+```
+
+E que a imagem publicada de fato serve — puxando de volta e subindo:
+
+```bash
+docker run --rm -p 3100:3000 localhost:5000/revende-frontend:teste
+curl -s http://localhost:3100/ | grep -o '<h1[^>]*>[^<]*</h1>'
+```
+
+O `<h1>` tem que aparecer no HTML. Se não aparecer, o SSR não subiu, e as
+páginas que precisam ranquear chegariam vazias ao crawler.
+
+## 9. Ligar a pipeline
 
 A pipeline só publica quando o repositório tem estas configurações. Enquanto
 faltarem, o estágio de deploy é pulado com um aviso no painel — de propósito,
