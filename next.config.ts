@@ -8,8 +8,12 @@ const nextConfig: NextConfig = {
    *
    * Necessário porque `/` e `/evento/[id]` são rotas dinâmicas: renderizam no
    * servidor a cada request. Export estático não serviria.
+   *
+   * Na Vercel o empacotamento é outro (Build Output API, funções serverless):
+   * `standalone` não é usado lá e só duplica trabalho no build. Por isso sai
+   * quando `VERCEL` está presente — a imagem Docker do Nexus continua igual.
    */
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
 
   images: {
     // Lista fechada de origens. `hostname: "**"` aceitaria qualquer host, o que

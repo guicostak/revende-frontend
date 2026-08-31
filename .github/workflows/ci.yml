@@ -251,7 +251,9 @@ jobs:
             echo "| Segurança (CodeQL) | $(icone '${{ needs.seguranca.result }}') |"
             echo "| Quality gate (SonarCloud) | $(icone '${{ needs.qualidade.result }}') |"
             echo ""
-            echo "Publicação em homologação sai quando a mensagem do commit em \`main\` contém \`#deployuat\`, ou por disparo manual."
+            echo "Homologação (Nexus) sai quando a mensagem do commit em \`main\` contém \`#deployuat\`, ou por disparo manual."
+            echo ""
+            echo "Produção (revende.net) sai a cada push verde no \`main\`; PR ganha URL de pré-visualização."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Reprovar se algum estágio falhou
@@ -340,4 +342,151 @@ jobs:
             echo "| Tag móvel | \`homologacao\` |"
             echo "| Registry | ${{ vars.NEXUS_REGISTRY }} |"
             echo "| API embutida | ${{ vars.UAT_API_URL }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  # 8. Pré-visualização: todo PR ganha uma URL própria na Vercel,
+  #    construída do mesmo commit que passou pelos estágios acima.
+  # ─────────────────────────────────────────────────────────────
+  preview:
+    name: Pré-visualização (Vercel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: resumo
+    if: github.event_name == 'pull_request'
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Mesma guarda do Nexus: sem os segredos, `vercel pull` falharia com um
+      # erro de autenticação que não diz a ninguém o que precisa ser cadastrado.
+      - name: A Vercel está configurada?
+        id: vercel
+        run: |
+          if [ -n "${{ secrets.VERCEL_TOKEN }}" ] && [ -n "${{ secrets.VERCEL_PROJECT_ID }}" ]; then
+            echo "configurada=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurada=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Pré-visualização pulada — Vercel não configurada"
+              echo ""
+              echo "Faltam os segredos \`VERCEL_TOKEN\`, \`VERCEL_ORG_ID\` e"
+              echo "\`VERCEL_PROJECT_ID\` neste repositório."
+              echo ""
+              echo "Passo a passo em \`infra/vercel/README.md\` §3."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Instalar a CLI da Vercel
+        if: steps.vercel.outputs.configurada == 'true'
+        run: npm i -g vercel@latest
+
+      # `vercel pull` traz as variáveis de preview guardadas na Vercel.
+      # `NEXT_PUBLIC_*` é inlinado no build: é aqui que ele entra.
+      - name: Puxar configuração de preview
+        if: steps.vercel.outputs.configurada == 'true'
+        run: vercel pull --yes --environment=preview --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Construir
+        if: steps.vercel.outputs.configurada == 'true'
+        run: vercel build --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Publicar pré-visualização
+        if: steps.vercel.outputs.configurada == 'true'
+        id: publicar
+        run: |
+          url=$(vercel deploy --prebuilt --token="${{ secrets.VERCEL_TOKEN }}")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Registrar pré-visualização
+        if: steps.vercel.outputs.configurada == 'true'
+        run: |
+          {
+            echo "### 🔍 Pré-visualização publicada"
+            echo ""
+            echo "${{ steps.publicar.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  # 9. Produção: revende.net. O estado do `main` é o estado do site —
+  #    todo merge verde publica, sem passo manual em painel nenhum.
+  #    `vercel.json` desliga o deploy automático da própria Vercel para
+  #    que este job seja o único caminho até o domínio.
+  # ─────────────────────────────────────────────────────────────
+  producao:
+    name: Produção (Vercel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: resumo
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: producao
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: A Vercel está configurada?
+        id: vercel
+        run: |
+          if [ -n "${{ secrets.VERCEL_TOKEN }}" ] && [ -n "${{ secrets.VERCEL_PROJECT_ID }}" ]; then
+            echo "configurada=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurada=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⚠️ Publicação pulada — Vercel não configurada"
+              echo ""
+              echo "Faltam os segredos \`VERCEL_TOKEN\`, \`VERCEL_ORG_ID\` e"
+              echo "\`VERCEL_PROJECT_ID\` neste repositório."
+              echo ""
+              echo "Passo a passo em \`infra/vercel/README.md\` §3."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Instalar a CLI da Vercel
+        if: steps.vercel.outputs.configurada == 'true'
+        run: npm i -g vercel@latest
+
+      - name: Puxar configuração de produção
+        if: steps.vercel.outputs.configurada == 'true'
+        run: vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Construir
+        if: steps.vercel.outputs.configurada == 'true'
+        run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Publicar em produção
+        if: steps.vercel.outputs.configurada == 'true'
+        id: publicar
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Registrar publicação
+        if: steps.vercel.outputs.configurada == 'true'
+        run: |
+          {
+            echo "### 🚀 Publicado em produção"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Domínio | https://revende.net |"
+            echo "| Deployment | ${{ steps.publicar.outputs.url }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

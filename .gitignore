@@ -11,6 +11,10 @@ next-env.d.ts.timestamp
 # Cache incremental do TypeScript
 tsconfig.tsbuildinfo
 
+# Vínculo local com o projeto na Vercel (`vercel pull` gera aqui).
+# A configuração versionada é o vercel.json; isto é estado da máquina.
+/.vercel
+
 # Relatório de cobertura (gerado pelo Vitest, consumido pelo SonarCloud)
 /coverage
 

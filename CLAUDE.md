@@ -394,6 +394,8 @@ Checklist completo: `docs/seo/checklist-seo.md`.
 | Quality gate | SonarCloud, projeto `guicostak_revende-frontend` |
 | Resumo | painel final; reprova se qualquer estágio falhou |
 | Homologação | imagem Docker publicada no Nexus |
+| Pré-visualização | URL própria na Vercel, a cada PR |
+| Produção | `revende.net` na Vercel, a cada push verde na `main` |
 
 Duas guardas são próprias deste projeto e ficam em `scripts/`:
 
@@ -421,6 +423,28 @@ produção — cada ambiente tem sua imagem, ainda que do mesmo commit.
 O Nexus sobe com `docker compose -f infra/nexus/docker-compose.yml up -d`. A
 configuração dos repositórios, do realm Docker e das variáveis da pipeline está em
 [`infra/nexus/README.md`](infra/nexus/README.md).
+
+### Produção — Vercel, em `revende.net`
+
+Produção é GitOps: **o estado do `main` é o estado do site**. Todo push verde na
+`main` publica, e todo PR ganha uma URL de pré-visualização — ambos depois do estágio
+`resumo`, ou seja, só com validação, build, testes, CodeQL e quality gate passando.
+
+O deploy automático da própria Vercel está **desligado** em `vercel.json`
+(`git.deploymentEnabled: false`). Sem isso haveria um segundo caminho até o domínio
+que não passa pela pipeline.
+
+`next.config.ts` liga `output: 'standalone'` só fora da Vercel: `standalone` serve à
+imagem Docker do Nexus; a Vercel empacota pela Build Output API e não usa a pasta.
+
+**A Vercel recusa build com Next.js vulnerável.** O primeiro deploy falhou por isso
+(o projeto estava em 15.1.6); hoje está em 15.5.24. Manter o Next atualizado é
+requisito de publicação, não só higiene — ver `infra/vercel/README.md` §7.
+
+Segredos (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`), variáveis de
+ambiente e os registros de DNS estão em
+[`infra/vercel/README.md`](infra/vercel/README.md). Sem os segredos os dois jobs
+pulam com explicação no painel, como já faz a guarda do Nexus.
 
 ## Pendências conhecidas
 
