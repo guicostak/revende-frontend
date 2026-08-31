@@ -78,6 +78,34 @@ Ficam na Vercel (**Project → Settings → Environment Variables**), não no re
 `NEXT_PUBLIC_SITE_URL` é de onde saem canonical, Open Graph, `sitemap.xml` e o JSON-LD.
 Apontar para o valor errado em produção quebra as quatro coisas de uma vez.
 
+### As duas precisam ser do tipo `Config`, nunca `Secret`
+
+No formulário da Vercel, **`Secret` vem marcado por padrão** — e foi assim que as duas
+foram criadas na primeira vez. O resultado não é um erro de permissão, é um build que
+quebra longe da causa:
+
+```
+Failed to collect configuration for /_not-found
+  cause: TypeError: Invalid URL
+  code: 'ERR_INVALID_URL', input: '[SENSITIVE]'
+```
+
+Valor `Secret` é write-only: `vercel pull` não consegue lê-lo e grava um marcador no
+`.env` em vez da URL. `new URL(marcador)` em `metadataBase` (`src/app/layout.tsx`)
+estoura, e o Next ainda redige o valor como `[SENSITIVE]` no log — então a mensagem não
+diz qual variável causou.
+
+Sinal de diagnóstico: se a variável estivesse **ausente**, o fallback de
+`src/config/env.ts` (`http://localhost:3000`) é URL válida e o build passaria. Build
+quebrando em `Invalid URL` significa que a variável existe e o valor não é URL.
+
+Além de quebrar, `Secret` aqui é semanticamente errado: `NEXT_PUBLIC_*` é inlinado no
+bundle do browser em tempo de build — é público por definição, não há o que proteger.
+
+Um `Secret` salvo **não pode ser convertido** para `Config` ("saved secrets are
+write-only"). Só apagando e recriando. Na lista, `Config` aparece com ícone `<>` e um
+olho para revelar; `Secret` aparece com cadeado e o *Copy to Clipboard* desabilitado.
+
 ## 5. O domínio
 
 `revende.net` é registrado na GoDaddy, e **o DNS continua lá** — os nameservers
